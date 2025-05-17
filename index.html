@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pixel Car Game</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      background-color: #ccc;
+      font-family: monospace;
+      padding: 20px;
+    }
+
+    .game-container {
+      display: flex;
+      border: 4px solid #444;
+      background: #aaa;
+      padding: 10px;
+    }
+
+    .track {
+      display: grid;
+      grid-template-columns: repeat(10, 10px);
+      grid-template-rows: repeat(20, 10px);
+      gap: 1px;
+      background-color: #bbb;
+      position: relative;
+    }
+
+    .cell {
+      width: 10px;
+      height: 10px;
+      background-color: #bbb;
+    }
+
+    .line-marker {
+      background-color: #000;
+    }
+
+    .car-part, .obstacle-part {
+      background-color: #000;
+    }
+
+    .sidebar {
+      margin-left: 20px;
+      color: #111;
+      font-size: 14px;
+    }
+
+    .info-label {
+      margin: 10px 0 5px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-container">
+    <div class="track" id="track"></div>
+    <div class="sidebar">
+      <div class="info-label">SCORE</div>
+      <div id="score">0</div>
+      <div class="info-label">HI-SCORE</div>
+      <div id="hi-score">0</div>
+      <div class="info-label">SPEED</div>
+      <div id="speed">1</div>
+      <div class="info-label">PASSED CARS</div>
+      <div id="level">1</div>
+    </div>
+  </div>
+
+  <script>
+    const track = document.getElementById("track");
+
+    // Створення клітинок
+    const cells = [];
+    for (let row = 0; row < 20; row++) {
+      for (let col = 0; col < 10; col++) {
+        const cell = document.createElement("div");
+        cell.classList.add("cell");
+        track.appendChild(cell);
+        cells.push(cell);
+      }
+    }
+
+    // Малюємо авто по центру
+    const drawCar = (x, y, isObstacle = false) => {
+      const index = (r, c) => (y + r) * 10 + (x + c);
+
+      // Car pattern:
+      const parts = [
+        [0, 0],        // перший ряд — центр
+        [-1, 1], [0, 1], [1, 1],  // другий ряд — три пікселі
+        [0, 2],        // третій ряд — центр
+        [-1, 3], [1, 3] // четвертий ряд — зліва та справа
+      ];
+
+      parts.forEach(([dx, dy]) => {
+        const i = index(dy, dx);
+        if (cells[i]) cells[i].classList.add(isObstacle ? "obstacle-part" : "car-part");
+      });
+    };
+
+    // Початкові змінні гри
+    const PLAYER_START_X = 4;
+    const PLAYER_START_Y = 16;
+    let playerX = PLAYER_START_X;
+    let playerY = PLAYER_START_Y;
+    let score = 0;
+    let hiScore = 0;
+    let speed = 1;
+    let passedCars = 0; // Лічильник обігнаних машин
+    let gameLoop;
+    let obstacles = [];
+    let lineOffset = 0; // Для анімації бокових ліній
+    let lastObstacleTime = 0; // Для рівномірної генерації перешкод
+    
+    // Оновлення бокових ліній
+    const updateTrackLines = () => {
+      cells.forEach((cell, index) => {
+        const col = index % 10;
+        const row = Math.floor(index / 10);
+        
+        // Видаляємо старі лінії
+        cell.classList.remove("line-marker");
+        
+        // Додаємо нові з урахуванням зміщення
+        if ((col === 0 || col === 9) && (row + lineOffset) % 4 < 2) {
+          cell.classList.add("line-marker");
+        }
+      });
+      
+      // Зменшуємо зміщення для анімації руху зверху вниз
+      lineOffset = (lineOffset + 3) % 4; // +3 еквівалентно -1 в циклі по модулю 4
+    };
+    
+    // Оновлення відображення статистики
+    const updateStats = () => {
+      document.getElementById("score").textContent = score;
+      document.getElementById("hi-score").textContent = hiScore;
+      document.getElementById("speed").textContent = speed;
+      document.getElementById("level").textContent = passedCars; // Показуємо кількість обігнаних машин
+    };
+
+    // Підрахунок обігнаних машин
+    const updatePassedCars = () => {
+      obstacles = obstacles.filter(obstacle => {
+        if (obstacle.y >= playerY && !obstacle.counted) {
+          passedCars++;
+          obstacle.counted = true;
+          // Збільшуємо швидкість кожні 5 обігнаних машин
+          if (passedCars % 5 === 0) {
+            speed = Math.min(10, speed + 1); // Обмежуємо максимальну швидкість до 10
+          }
+          return true;
+        }
+        return obstacle.y < 20;
+      });
+    };
+
+    // Очищення треку
+    const clearTrack = () => {
+      cells.forEach(cell => {
+        cell.classList.remove("car-part");
+        cell.classList.remove("obstacle-part");
+      });
+    };
+
+    // Малювання перешкод
+    const drawObstacles = () => {
+      obstacles.forEach(obstacle => {
+        drawCar(obstacle.x, obstacle.y, true);
+      });
+    };
+
+    // Оновлення позицій перешкод
+    const updateObstacles = () => {
+      const currentTime = Date.now();
+      
+      // Рух існуючих перешкод
+      obstacles.forEach(obstacle => {
+        obstacle.y++;
+      });
+      
+      // Видалення перешкод, що вийшли за межі
+      obstacles = obstacles.filter(obstacle => obstacle.y < 20);
+      
+      // Генерація нових перешкод з регулярним інтервалом
+      // Використовуємо квадратний корінь від швидкості для більш плавного збільшення частоти
+      // Збільшуємо базовий інтервал для уповільнення гри
+      if (currentTime - lastObstacleTime > 2800 / Math.sqrt(speed)) {
+        const possiblePositions = [2, 3, 4, 5, 6, 7];
+        const x = possiblePositions[Math.floor(Math.random() * possiblePositions.length)];
+        
+        if (canPlaceObstacle(x)) {
+          obstacles.push({ x, y: 0 });
+          lastObstacleTime = currentTime;
+        }
+      }
+    };
+
+    // Отримання координат всіх пікселів машини
+    const getCarPixels = (x, y) => {
+      const parts = [
+        [0, 0],        // центр
+        [-1, 1], [0, 1], [1, 1],  // три пікселі
+        [0, 2],        // центр
+        [-1, 3], [1, 3] // зліва та справа
+      ];
+      return parts.map(([dx, dy]) => ({
+        x: x + dx,
+        y: y + dy
+      }));
+    };
+
+    // Перевірка перетину двох машин
+    const checkCarCollision = (car1X, car1Y, car2X, car2Y) => {
+      const car1Pixels = getCarPixels(car1X, car1Y);
+      const car2Pixels = getCarPixels(car2X, car2Y);
+      
+      return car1Pixels.some(pixel1 =>
+        car2Pixels.some(pixel2 =>
+          pixel1.x === pixel2.x && pixel1.y === pixel2.y
+        )
+      );
+    };
+
+    // Перевірка можливості розміщення нової перешкоди
+    const canPlaceObstacle = (x) => {
+      return !obstacles.some(obstacle =>
+        // Перевіряємо відстань по горизонталі для уникнення блокування проїзду
+        Math.abs(obstacle.x - x) <= 3 &&
+        // Перевіряємо тільки перешкоди у верхній частині екрану
+        obstacle.y <= 4
+      );
+    };
+
+    // Перевірка колізій
+    const checkCollisions = () => {
+      return obstacles.some(obstacle =>
+        checkCarCollision(playerX, playerY, obstacle.x, obstacle.y)
+      );
+    };
+
+    // Головний цикл гри
+    const gameStep = () => {
+      clearTrack();
+      
+      updateTrackLines(); // Анімація бокових ліній синхронна з рухом перешкод
+      
+      updateObstacles();
+      drawObstacles();
+      drawCar(playerX, playerY);
+      
+      if (checkCollisions()) {
+        gameOver();
+        return;
+      }
+      
+      // Збільшення очків
+      score += speed;
+      if (score > hiScore) hiScore = score;
+      
+      updatePassedCars();
+      updateStats();
+    };
+
+    // Обробка кінця гри
+    const gameOver = () => {
+      clearInterval(gameLoop);
+      alert(`Game Over! Score: ${score}`);
+      
+      // Скидання гри
+      obstacles = [];
+      playerX = PLAYER_START_X;
+      playerY = PLAYER_START_Y;
+      score = 0;
+      speed = 1;
+      passedCars = 0;
+      
+      updateStats();
+      startGame();
+    };
+
+    // Запуск гри
+    const startGame = () => {
+      gameLoop = setInterval(gameStep, 140); // Замедляем общую скорость игры
+    };
+
+    // Управління
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" && playerX > 2) { // Минимальная позиция 2, чтобы не касаться левой границы
+        playerX--;
+      } else if (e.key === "ArrowRight" && playerX < 7) { // Максимальная позиция 7, чтобы не касаться правой границы
+        playerX++;
+      }
+    });
+
+    // Початковий запуск
+    drawCar(playerX, playerY);
+    startGame();
+  </script>
+</body>
+</html>
